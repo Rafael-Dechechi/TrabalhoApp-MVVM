@@ -1,110 +1,132 @@
 // Em ui/screens/orders/OrdersViewModel.kt
 package com.example.trabalhoapp2.ui.screens.orders
 
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.example.trabalhoapp2.data.model.Order
-import com.example.trabalhoapp2.data.model.ValidTickers
 import com.example.trabalhoapp2.data.repository.OrderRepository
-import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+// O import da sua nova classe será adicionado aqui automaticamente (ou adicione)
+// import com.example.trabalhoapp2.ui.screens.orders.OrderUiState
 
-data class OrderUiState(
-    val selectedTicker: String = ValidTickers.first(),
-    val selectedType: String = "COMPRA",
-    val quantityText: String = "",
-    val priceText: String = "",
-    val isEditing: Boolean = false,
-    val orderId: Int? = null,
-    val orderStatus: String = "Pendente"
-)
+/**
+ * O ViewModel NÃO TEM MAIS a data class OrderUiState aqui dentro.
+ */
+class OrdersViewModel(private val repository: OrderRepository) : ViewModel() {
 
-
-class OrdersViewModel : ViewModel() {
-
-
-    private val repository = OrderRepository
-
-
-    val orders: StateFlow<List<Order>> = repository.orders
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = emptyList()
-        )
-
-
-    var uiState by mutableStateOf(OrderUiState())
-        private set
-
+    // --- Parte 1: Para a Lista de Ordens (OrdersScreen) ---
+    val orders: StateFlow<List<Order>> = repository.orders.stateIn(
+        scope = viewModelScope,
+        started = kotlinx.coroutines.flow.SharingStarted.WhileSubscribed(5000L),
+        initialValue = emptyList()
+    )
 
     fun deleteOrder(id: Int) {
-        repository.deleteOrder(id)
-    }
-
-
-    fun loadOrderForEdit(orderId: Int) {
-        val order = repository.getOrderById(orderId)
-        if (order != null) {
-            uiState = OrderUiState(
-                selectedTicker = order.ticker,
-                selectedType = order.type,
-                quantityText = order.quantity.toString(),
-                priceText = order.price.toString(),
-                isEditing = true,
-                orderId = order.id,
-                orderStatus = order.status
-            )
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.deleteOrder(id)
         }
     }
 
+    // --- Parte 2: Para a Tela de Adicionar/Editar (AddEditOrderScreen) ---
 
-    fun resetOrderState() {
-        uiState = OrderUiState()
+    private val _uiState = MutableStateFlow(OrderUiState()) // Usa a classe do outro arquivo
+    val uiState: StateFlow<OrderUiState> = _uiState.asStateFlow()
+
+    // Funções chamadas pelos campos de texto
+    fun onTickerChange(ticker: String) {
+        _uiState.update { it.copy(selectedTicker = ticker) }
+    }
+    fun onTypeChange(type: String) {
+        _uiState.update { it.copy(selectedType = type) }
+    }
+    fun onQuantityChange(quantity: String) {
+        _uiState.update { it.copy(quantityText = quantity) }
+    }
+    fun onPriceChange(price: String) {
+        _uiState.update { it.copy(priceText = price) }
     }
 
-    fun onTickerChange(ticker: String) { uiState = uiState.copy(selectedTicker = ticker) }
-    fun onTypeChange(type: String) { uiState = uiState.copy(selectedType = type) }
-    fun onQuantityChange(qty: String) { uiState = uiState.copy(quantityText = qty.filter { it.isDigit() }) }
-    fun onPriceChange(price: String) { uiState = uiState.copy(priceText = price.filter { it.isDigit() || it == '.' }) }
-
-
-    fun saveOrder(): Boolean {
-        val qty = uiState.quantityText.toIntOrNull()
-        val price = uiState.priceText.toDoubleOrNull()
-
-
-        if (qty == null || price == null || qty <= 0 || price <= 0) {
-            return false
-        }
-
-        if (uiState.isEditing && uiState.orderId != null) {
-
-            val updatedOrder = Order(
-                id = uiState.orderId!!,
-                ticker = uiState.selectedTicker,
-                type = uiState.selectedType,
-                quantity = qty,
-                price = price,
-                status = uiState.orderStatus
-            )
-            repository.updateOrder(updatedOrder)
-
+    // Chamado quando a tela de edição é aberta
+    fun loadOrderForEdit(orderId: Int?) {
+        if (orderId != null) {
+            viewModelScope.launch(Dispatchers.IO) {
+                val order = repository.getOrderById(orderId)
+                if (order != null) {
+                    _uiState.update {
+                        it.copy(
+                            id = order.id,
+                            selectedTicker = order.ticker,
+                            selectedType = order.type,
+                            quantityText = order.quantity.toString(),
+                            priceText = order.price.toString(),
+                            isEditing = true
+                        )
+                    }
+                }
+            }
         } else {
+            resetOrderState()
+        }
+    }
 
-            repository.addOrder(
-                ticker = uiState.selectedTicker,
-                type = uiState.selectedType,
-                qty = qty,
-                price = price
-            )
+    // Reseta o formulário
+    fun resetOrderState() {
+        _uiState.value = OrderUiState()
+    }
+
+    // Salva (insere ou atualiza) a ordem
+    fun saveOrder() {
+        val currentState = _uiState.value
+        val quantity = currentState.quantityText.toIntOrNull() ?: 0
+        val price = currentState.priceText.toDoubleOrNull() ?: 0.0
+
+        if (currentState.selectedTicker.isBlank() || quantity <= 0 || price <= 0) {
+            return
         }
 
-        resetOrderState()
-        return true
+        viewModelScope.launch(Dispatchers.IO) {
+            if (currentState.isEditing) {
+                val updatedOrder = Order(
+                    id = currentState.id,
+                    ticker = currentState.selectedTicker,
+                    type = currentState.selectedType,
+                    quantity = quantity,
+                    price = price,
+                    status = "Pendente"
+                )
+                repository.updateOrder(updatedOrder)
+            } else {
+                repository.addOrder(
+                    ticker = currentState.selectedTicker,
+                    type = currentState.selectedType,
+                    qty = quantity,
+                    price = price
+                )
+            }
+        }
+    }
+}
+
+/**
+ * A Fábrica.
+ * Certifique-se de que esta é a ÚNICA definição dela.
+ */
+class OrdersViewModelFactory(
+    private val repository: OrderRepository
+) : ViewModelProvider.Factory {
+
+    override fun <T : ViewModel> create(modelClass: Class<T>): T {
+        if (modelClass.isAssignableFrom(OrdersViewModel::class.java)) {
+            @Suppress("UNCHECKED_CAST")
+            return OrdersViewModel(repository) as T // <-- Corrigido
+        }
+        throw IllegalArgumentException("Unknown ViewModel class")
     }
 }

@@ -6,16 +6,20 @@ import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Receipt
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.room.Entity
+import androidx.room.PrimaryKey
 
+
+@Entity(tableName = "orders") // Define o nome da tabela
 data class Order(
-    val id: Int,
+    @PrimaryKey(autoGenerate = true) // Chave primária autogerada
+    val id: Int = 0, // Inicia com 0 para novos pedidos
     val ticker: String,
     val type: String,
     val quantity: Int,
     val price: Double,
     val status: String
 )
-
 data class PortfolioItem(
     val name: String,
     val percentage: Int,
